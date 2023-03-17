@@ -88,9 +88,12 @@ public class JcohyAsciidoctorPlugins implements Plugin<Project> {
     private void addAsciidoctorTaskAttributes(Project project,Map<String, Object> attributes) {
         attributes.put("rootProject", project.getRootProject().getProjectDir());
         attributes.put("sources-root", project.getProjectDir() + "/src");
+        System.out.println(project.getVersion());
+        attributes.put("version", project.getVersion());
         attributes.put("image-resource", "https://resources.jcohy.com/jcohy-docs/images/" + project.getVersion() + "/" + project.getName());
         attributes.put("spring-api-doc", "https://docs.spring.io/" + project.getName());
         attributes.put("doc-root","https://docs.jcohy.com");
+        attributes.put("reactorreleasetrain","2022.0.0");
         attributes.put("spring-docs-prefix","https://docs.spring.io/spring-framework/docs/");
         attributes.put("gh-samples-url","https://github.com/spring-projects/spring-security/master/");
         attributes.put("docs-java", project.getRootProject().getProjectDir() + "/src/main/java/com/jcohy/sample/redis");

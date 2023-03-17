@@ -1,0 +1,144 @@
+[[metrics]]
+= 暴漏 Reactor 指标
+
+Project Reactor 是一个旨在提高性能和更好地利用资源的库.但是要真正了解系统的性能,最好是能够监视其各种组件.
+
+这就是为什么 Reactor 通过 `reactor-core-micrometer` 模块提供与 https://micrometer.io[Micrometer] 的内置集成的原因.
+该模块在 `2022.0 BOM` 版本中引入，提供了对 Micrometer 的显式依赖。
+
+NOTE: 在 Reactor-Core `3.5.0` 之前，metrics 被实现为操作符，如果 Micrometer 不在类路径中，这些操作符将是空操作。
+
+`reactor-core-micrometer` API 要求用户显式提供一种 _registry_ 形式，而不是依赖于硬编码的全局注册表。
+将检测应用于具有 NATIVE 命名或标签概念的类时，这些 API 将尝试在响应式链中发现此类元素。
+否则，API 将期望在注册表中提供用于命名 meters  的前缀。
+
+== Scheduler metrics
+
+Reactor 中的每个异步操作都是通过 Threading and Schedulers 中描述的 <<schedulers>> 抽象来完成的. 这就是为什么监视您的 `Scheduler`
+
+`reactor-core-micrometer` 模块提供了一个 "timed"`Scheduler` 包装器，可以围绕通过它提交的任务执行测量，可以按如下方式使用：
+
+====
+[source,java]
+----
+Scheduler originalScheduler = Schedulers.newParallel("test", 4);
+
+Scheduler schedulerWithMetrics = Micrometer.timedScheduler(
+	originalScheduler, // <1>
+	applicationDefinedMeterRegistry, // <2>
+	"testingMetrics", // <3>
+	Tags.of(Tag.of("additionalTag", "yes")) // <4>
+);
+----
+====
+<1> 包装 `Scheduler`
+<2> 发布 metrics 的 `MeterRegistry`
+<3> 用于命名 meters 的前缀。 例如，这将导致创建一个 `testingMetrics.scheduler.tasks.completed` meter。
+<4> 可选的 tag，为包装的 `Scheduler` 创建所有的  meters
+
+IMPORTANT: 当包装一个通用的 `Scheduler`（例如 `Schedulers.single()`）或一个在多个地方使用的 `Scheduler` 时，只有 `Runnable` 任务是
+通过 `Micrometer#timedScheduler` 返回的包装器实例提交的数据将被检测。
+
+请参阅 <<micrometer-details-timedScheduler>> 以了解生成的 meters 和相关的默认标签。
+
+// FIXME reactor-monitoring-demo won't be in sync with 3.5.0 anymore
+//TIP: Grafana + Prometheus users can use https://raw.githubusercontent.com/reactor/reactor-monitoring-demo/master/dashboards/schedulers.json[a pre-built dashboard] which includes panels for threads, completed tasks, task queues and other handy metrics.
+
+== Publisher metrics
+
+有时,能够在 reactive pipeline 的某个阶段记录指标很有用.
+
+一种方法是从提供给 `tap` 运算符的自定义 `SignalListener` 将值手动推送到您选择的指标后端。
+
+开箱即用的实现实际上是由  `reactor-core-micrometer` 模块通过 `Micrometer#metrics` API 提供的。
+Consider the following pipeline:
+====
+[source,java]
+----
+listenToEvents()
+    .doOnNext(event -> log.info("Received {}", event))
+    .delayUntil(this::processEvent)
+    .retry()
+    .subscribe();
+----
+====
+
+要启用此源 `Flux` 的 metrics(从 `listenToEvents()` 返回),我们需要为其命名并打开收集的 metrics:
+====
+[source,java]
+----
+listenToEvents()
+    .name("events") // <1>
+    .tap(Micrometer.metrics( // <2>
+        applicationDefinedMeterRegistry // <3>
+    ))
+    .doOnNext(event -> log.info("Received {}", event))
+    .delayUntil(this::processEvent)
+    .retry()
+    .subscribe();
+----
+<1> reactive pipeline 此阶段的每个指标都将被标识为 (可选的, 默认为 `reactor` 前缀).
+<2> 使用 `tap` 操作符结合 `reactor-core-micrometer` 中提供的 `SignalListener` 来实现手机指标
+<3> 与该模块中的其他 API 一样，需要明确提供用于发布指标的 `MeterRegistry`.
+====
+
+<<micrometer-details-metrics>> 中提供了公开指标的详细信息。
+
+//TODO update and reintroduce tips for using the metrics
+//Want to know how many times your event processing has restarted due to some error? Read `[name].subscribed`, because `retry()` operator will re-subscribe to the source publisher on error.
+//
+//Interested in "events per second" metric? Measure the rate of `[name].onNext.delay` 's count.
+//
+//Want to be alerted when the listener throws an error? `[name].flow.duration` with `status=error` tag is your friend.
+//Similarly, `status=completed` and `status=completedEmpty` will allow you to distinguish sequences that completed with elements from sequences that completed empty.
+//
+//Please note that when giving a name to a sequence, this sequence could not be aggregated with others anymore. As a compromise if you want to identify your sequence but still make it possible to aggregate with other views, you can use a <<Tags>> for the name by calling `(tag("flow", "events"))` for example.
+
+
+
+=== Tags
+
+除了 <<micrometer-details-metrics>> 中描述的常用标签之外，用户还可以通过 `tag` 操作符将自定义标签添加到他们的响应式链中：
+====
+[source,java]
+----
+listenToEvents()
+    .name("events") // <1>
+    .tag("source", "kafka") // <2>
+    .tap(Micrometer.metrics(applicationDefinedRegistry)) // <3>
+    .doOnNext(event -> log.info("Received {}", event))
+    .delayUntil(this::processEvent)
+    .retry()
+    .subscribe();
+----
+<1> 此阶段的每个指标都将被标识为 "events".
+<2> 设置自定义标签 "source" 值为 "kafka".
+<3> 除上述常见标签外,所有报告的指标还将分配有 "source = kafka" 标签.
+====
+
+请注意，根据您使用的监控系统，使用标签时可以认为使用名称是强制性的，否则会导致两个默认命名序列之间的标签集不同。
+Prometheus 等一些系统可能还需要为每个具有相同名称的指标设置完全相同的标签集。
+
+=== 观察
+除了完整指标外，`reactor-core-micrometer` 模块还提供了基于 Micrometer 的 `Observation` 的替代方案。
+根据配置和运行时类路径，`Observation` 可以转换为 timers、spans、logging statements 或任何组合。
+
+可以通过 `tap` 操作符和 `Micrometer.observation` 观察响应链，如下所示:
+====
+[source,java]
+----
+listenToEvents()
+    .name("events") // <1>
+    .tap(Micrometer.observation( // <2>
+		applicationDefinedRegistry)) // <3>
+    .doOnNext(event -> log.info("Received {}", event))
+    .delayUntil(this::processEvent)
+    .retry()
+    .subscribe();
+----
+<1> 此 pipeline 的 `Observation` 使用 "events" 作为前缀.
+<2> 使用 `tap` 操作符与 `observation`.
+<3> 必须提供一个注册表来发布观察结果。 请注意，这是一个 `ObservationRegistry`。
+====
+
+<<micrometer-details-observation>> 中提供了观察的详细信息及其标签。

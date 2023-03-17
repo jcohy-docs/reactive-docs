@@ -1,5 +1,5 @@
-rootProject.name = "jcohy-docs-template"
+rootProject.name = "reactive-docs"
 
-include 'docs-sample'
+include 'reactive-stream-jvm'
 
-include 'docs-sample2'
+include 'reactor'

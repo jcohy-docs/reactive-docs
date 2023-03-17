@@ -7,10 +7,16 @@ description = "Jcohy Docs"
 
 apply plugin: "com.jcohy.archives"
 
+configure (project(":reactive-stream-jvm")){
+	version = "1.0.4"
+}
+
+configure(project(":reactor")) {
+	version = "3.0.0"
+}
 configure(allprojects) { abjects ->
 
 	group = "com.jcohy.docs"
-	version = "3.0.0"
 
     repositories {
         maven { url = 'https://maven.aliyun.com/repository/central'}
